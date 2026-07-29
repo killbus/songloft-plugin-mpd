@@ -13,6 +13,6 @@
   "permissions": ["storage", "persistent-storage", "songs.read", "playlists.read", "command", "net", "inter-plugin"],
   "updateUrl": "https://raw.githubusercontent.com/songloft-org/songloft-plugin-mpd/main/plugin.json",
   "download_url": "https://github.com/songloft-org/songloft-plugin-mpd/releases/download/v2.1.1/mpd-player.jsplugin.zip",
-  "entryHash": "1a76988609a1edf3e04129c6e13efbfa8eb380c70baf06b73146e6e4171d43b2",
-  "zipHash": "0882fde7918a03efc42c52a3d1721c260de4e6d9ebb47dbdabbf433fd247fbcb"
+  "entryHash": "",
+  "zipHash": ""
 }
