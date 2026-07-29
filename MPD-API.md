@@ -61,6 +61,27 @@ var result = await songloft.comm.call("mpd-player", "action-name", { ... }, 5000
 |--------|------|------|
 | `status` | `{}` | 获取当前播放状态（含当前歌曲、进度、音量、播放模式等） |
 
+#### 如何判断播放器是否在线（可播）
+
+不要单独判断"MPD 进程状态"——插件支持 MPD / DLNA 两种输出模式，DLNA 模式下 MPD 进程停止是正常的。正确做法是用 `status` 三步判定：
+
+```typescript
+var r = await songloft.comm.call("mpd-player", "status", {}, 5000);
+if (!r || !r.success) {
+  // 插件未运行或内部出错，不可播
+} else if (r.data.outputMode === "mpd") {
+  var online = r.data.serviceStatus === "running";   // MPD 后端是否在线
+} else if (r.data.outputMode === "dlna") {
+  var online = !!r.data.dlnaDevice;                   // 是否已选中 DLNA 设备
+}
+```
+
+| 层级 | 判据 | 含义 |
+|------|------|------|
+| 1 | `comm.call` 抛错或 `success=false` | 插件本身不在线 |
+| 2 | `data.outputMode` | 当前输出模式：`"mpd"` 或 `"dlna"` |
+| 3 | MPD：`serviceStatus === "running"`；DLNA：`dlnaDevice` 非空 | 该模式的播放后端是否就绪 |
+
 ## 使用示例
 
 ### 有声书插件：播放指定章节
