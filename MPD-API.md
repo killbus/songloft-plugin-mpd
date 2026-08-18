@@ -78,7 +78,7 @@ if (result.success && result.data) {
 | Action | 参数 | 说明 |
 |--------|------|------|
 | `play` | `{ songId: number }` | 立即播放指定歌曲（需 songId 来自 Songloft 歌曲库） |
-| `play-url` | `{ url: string, title?: string, artist?: string }` | 直接播放在线音频 URL，不经过歌曲库 |
+| `play-url` | `{ url: string, title?: string, artist?: string, album?: string, cover_url?: string, duration?: number }` | 把在线音频 URL **追加到队列末尾并播放**（不经过歌曲库，**不会清空原队列**） |
 | `pause` | `{}` | 暂停播放（正在播放时生效） |
 | `resume` | `{}` | 恢复播放（已暂停时生效） |
 | `toggle` | `{}` | 切换播放/暂停 |
@@ -92,7 +92,7 @@ if (result.success && result.data) {
 | Action | 参数 | 说明 |
 |--------|------|------|
 | `queue-replace` | `{ songIds: number[] }` | 清空队列并添加新歌曲 |
-| `queue-append` | `{ songIds?: number[], urls?: string[] }` | 追加歌曲/URL 到队列末尾（可同时传 songIds 和 urls） |
+| `queue-append` | `{ songIds?: number[], urls?: Array<string \| { url: string; title?: string; artist?: string; album?: string; cover_url?: string; duration?: number }> }` | 追加歌曲/URL 到队列末尾（可同时传 songIds 和 urls；`urls` 支持纯字符串或携带标题/封面信息的对象，供 DLNA 推送与队列显示使用） |
 | `queue-clear` | `{}` | 清空队列 |
 | `queue-jump` | `{ position: number }` | 跳转到队列指定位置并播放（1-based） |
 | `queue-move` | `{ fromPosition: number, toPosition: number }` | 移动队列中歌曲位置（1-based） |
@@ -109,7 +109,7 @@ if (result.success && result.data) {
 
 | Action | 参数 | 说明 |
 |--------|------|------|
-| `status` | `{}` | 获取当前播放状态（含当前歌曲、进度、音量、播放模式等） |
+| `status` | `{}` | 获取当前播放状态（含当前歌曲、进度、音量、播放模式、封面等） |
 
 #### 如何判断播放器是否在线（可播）
 
@@ -132,6 +132,39 @@ if (!r || !r.success) {
 | 2 | `data.outputMode` | 当前输出模式：`"mpd"` 或 `"dlna"` |
 | 3 | MPD：`serviceStatus === "running"`；DLNA：`dlnaDevice` 非空 | 该模式的播放后端是否就绪 |
 
+#### `currentSong` 字段说明
+
+当有歌曲正在播放时，`data.currentSong` 包含以下字段：
+
+```typescript
+{
+  songId: string | null;  // 歌曲库 ID，URL 项（play-url）为 null
+  title: string;          // 歌曲标题。URL 项从 play-url 传入的 title 回填
+  artist: string;         // 歌手。URL 项从 play-url 传入的 artist 回填
+  album: string;          // 专辑。URL 项从 play-url 传入的 album 回填
+  cover_url?: string;     // 封面图片 URL。库内歌曲："/api/v1/songs/{id}/cover"；
+                          // 在线音乐/电台：推送时传入的绝对 CDN URL
+}
+```
+
+`cover_url` 可直接用于 `<img>` 标签或 `background-image`。相对路径（库内歌曲）需拼接宿主域名，绝对 URL（在线音乐/电台）可直接使用。
+
+#### `lyrics` 字段说明
+
+`data.lyrics` 包含当前歌曲的歌词状态：
+
+```typescript
+{
+  source: "api" | "library" | "none";  // 歌词来源
+  available: boolean;                   // 是否有歌词行
+  lines: Array<{ timeSeconds: number; text: string }>;
+}
+```
+
+- `source: "api"` — 通过 `/api/v1/songs/{id}/lyric` 从宿主获取
+- `source: "library"` — 从歌曲库记录中读取（`lyrics`/`lyric`/`lrc` 字段）
+- `source: "none"` — 无真实歌词，`lines` 为空数组（不再返回 fallback 假歌词）
+
 ## 使用示例
 
 ### 有声书插件：播放指定章节
@@ -146,14 +179,16 @@ await songloft.comm.call("mpd-player", "queue-replace", {
 await songloft.comm.call("mpd-player", "seek", { seconds: 900 });
 ```
 
-### 在线音乐推送：直接播放 URL
+### 在线音乐推送：追加 URL 并播放
 
 ```typescript
-// 直接播放在线音频，不经过 Songloft 歌曲库
+// 把在线音频追加到当前队列末尾并立即播放，不清空原有队列
 await songloft.comm.call("mpd-player", "play-url", {
   url: "https://example.com/audio.mp3",
-  title: "播客 episode-1",   // 可选，DLNA 模式会用到
-  artist: "主播"              // 可选
+  title: "播客 episode-1",          // 可选，队列/设备显示用
+  artist: "主播",                     // 可选
+  cover_url: "https://example.com/c.jpg", // 可选，封面
+  duration: 180                      // 可选，秒
 });
 ```
 
@@ -167,10 +202,13 @@ await songloft.comm.call("mpd-player", "next", {}, 5000);
 ### 队列管理：追加歌曲和 URL
 
 ```typescript
-// 同时追加库内歌曲和外部 URL
+// 同时追加库内歌曲和外部 URL（urls 支持字符串或带元数据的对象）
 await songloft.comm.call("mpd-player", "queue-append", {
   songIds: [201, 202],
-  urls: ["https://example.com/audio.mp3"]
+  urls: [
+    "https://example.com/audio.mp3",
+    { url: "https://example.com/ep2.mp3", title: "episode-2", artist: "主播", cover_url: "https://example.com/c2.jpg" }
+  ]
 });
 ```
 
@@ -233,11 +271,11 @@ setInterval(async function() {
 
 - 所有 API 建议设置 5 秒超时
 - `play` 需要传入有效的 `songId`（来自 Songloft 歌曲库，通过 `songloft.songs.list` 或 `songloft.songs.search` 获取）
-- `play-url` 支持 MPD 和 DLNA 两种输出模式，MPD 模式直接播 URL，DLNA 模式会构建播放项推送给 DLNA 设备
+- `play-url` 支持 MPD 和 DLNA 两种输出模式，语义为**追加到队列末尾并播放该 URL，不清空原队列**；`title`/`artist`/`cover_url`/`duration` 会写入队列元数据，供 `/api/queue`、`status` 的 `currentSong` 与 DLNA 设备显示，建议传入
 - `queue-replace` 会清空当前队列，谨慎使用
 - `pause`/`resume` 内部会判断当前状态，不会误操作
-- `play-url` 的 `title` 和 `artist` 在 DLNA 模式下会显示在设备上，建议传入
-- `queue-append` 同时支持 `songIds`（库内歌曲）和 `urls`（外部 URL），可单独传或混合传
+- `play-url` 的 `title` 和 `artist` 在 MPD 和 DLNA 两种模式下均会显示在 `status.currentSong` 与设备上，建议传入
+- `queue-append` 同时支持 `songIds`（库内歌曲）和 `urls`（外部 URL），可单独传或混合传；`urls` 支持纯字符串或 `{url,title?,artist?,album?,cover_url?,duration?}` 对象（对象会写队列元数据）
 - `queue-remove` 支持 `position`（单条）和 `positions`（批量），至少传一个
 - `queue-jump` 和 `queue-move` 的 position 均为 1-based
 - `set-mode` 只修改传入的字段，不传的字段保持当前值不变
