@@ -1,3 +1,5 @@
+import { DEFAULT_FIFO_PATH, DEFAULT_FIFO_FORMAT, hasFifoOutput, validateFifoPreferences } from "./mpd/fifo";
+
 type CommandExecResult = {
   exitCode: number;
   stdout: string;
@@ -168,11 +170,13 @@ export type QueuePayload = {
 };
 
 export type AudioPreferencePayload = {
-  outputType: "auto" | "pulse" | "alsa" | "pipewire" | "null";
+  outputType: "auto" | "pulse" | "alsa" | "pipewire" | "null" | "fifo";
   xdgRuntimeDir: string;
   pulseServer: string;
   pipewireRemote: string;
   alsaDevice: string;
+  fifoPath: string;
+  fifoFormat: string;
   hasOverrides: boolean;
 };
 
@@ -219,6 +223,8 @@ const STORAGE_AUDIO_XDG_RUNTIME_DIR = "mpd:audio:xdg-runtime-dir";
 const STORAGE_AUDIO_PULSE_SERVER = "mpd:audio:pulse-server";
 const STORAGE_AUDIO_PIPEWIRE_REMOTE = "mpd:audio:pipewire-remote";
 const STORAGE_AUDIO_ALSA_DEVICE = "mpd:audio:alsa-device";
+const STORAGE_AUDIO_FIFO_PATH = "mpd:audio:fifo-path";
+const STORAGE_AUDIO_FIFO_FORMAT = "mpd:audio:fifo-format";
 const SONG_TARGET_METADATA_CACHE_TTL_MS = 300000; // 5分钟（从60秒延长）
 
 // ===== v1.0.8优化：性能监控系统 =====
@@ -1120,7 +1126,7 @@ type RuntimeFilesSnapshot = {
 type ManagedArchiveFormat = "tgz";
 
 type MpdAudioOutputCandidate = {
-  type: "pipewire" | "pulse" | "alsa" | "null";
+  type: "pipewire" | "pulse" | "alsa" | "null" | "fifo";
   name: string;
   lines: string[];
   reason: string;
@@ -2196,6 +2202,8 @@ function getAudioOutputTypeLabel(value: AudioPreferencePayload["outputType"]): s
       return "PipeWire（桌面 / 蓝牙）";
     case "null":
       return "Null（仅诊断）";
+    case "fifo":
+      return "FIFO（Snapcast PCM）";
     case "auto":
     default:
       return "自动选择（推荐）";
@@ -2589,6 +2597,7 @@ function normalizeAudioOutputType(value: string): AudioPreferencePayload["output
     case "alsa":
     case "pipewire":
     case "null":
+    case "fifo":
       return value.trim().toLowerCase() as AudioPreferencePayload["outputType"];
     default:
       return "auto";
@@ -2596,12 +2605,14 @@ function normalizeAudioOutputType(value: string): AudioPreferencePayload["output
 }
 
 export async function readAudioPreferences(songloft: SongloftCommandApi): Promise<AudioPreferencePayload> {
-  const [outputType, xdgRuntimeDir, pulseServer, pipewireRemote, alsaDevice] = await Promise.all([
-    songloft.storage.get(STORAGE_AUDIO_OUTPUT_TYPE).catch(() => ""),
+  const [outputType, xdgRuntimeDir, pulseServer, pipewireRemote, alsaDevice, fifoPath, fifoFormat] = await Promise.all([
+    songloft.storage.get(STORAGE_AUDIO_OUTPUT_TYPE),
     songloft.storage.get(STORAGE_AUDIO_XDG_RUNTIME_DIR).catch(() => ""),
     songloft.storage.get(STORAGE_AUDIO_PULSE_SERVER).catch(() => ""),
     songloft.storage.get(STORAGE_AUDIO_PIPEWIRE_REMOTE).catch(() => ""),
-    songloft.storage.get(STORAGE_AUDIO_ALSA_DEVICE).catch(() => "")
+    songloft.storage.get(STORAGE_AUDIO_ALSA_DEVICE).catch(() => ""),
+    songloft.storage.get(STORAGE_AUDIO_FIFO_PATH),
+    songloft.storage.get(STORAGE_AUDIO_FIFO_FORMAT)
   ]);
 
   const normalized = {
@@ -2609,7 +2620,9 @@ export async function readAudioPreferences(songloft: SongloftCommandApi): Promis
     xdgRuntimeDir: String(xdgRuntimeDir || "").trim(),
     pulseServer: String(pulseServer || "").trim(),
     pipewireRemote: String(pipewireRemote || "").trim(),
-    alsaDevice: String(alsaDevice || "").trim()
+    alsaDevice: String(alsaDevice || "").trim(),
+    fifoPath: fifoPath ?? DEFAULT_FIFO_PATH,
+    fifoFormat: fifoFormat ?? DEFAULT_FIFO_FORMAT
   };
 
   return {
@@ -2626,18 +2639,26 @@ export async function saveAudioPreferences(
   songloft: SongloftCommandApi,
   payload: Partial<AudioPreferencePayload> | null | undefined
 ): Promise<AudioPreferencePayload> {
-  const outputType = normalizeAudioOutputType(String(payload?.outputType || ""));
-  const xdgRuntimeDir = String(payload?.xdgRuntimeDir || "").trim();
-  const pulseServer = String(payload?.pulseServer || "").trim();
-  const pipewireRemote = String(payload?.pipewireRemote || "").trim();
-  const alsaDevice = String(payload?.alsaDevice || "").trim();
+  const current = await readAudioPreferences(songloft);
+  const outputType = normalizeAudioOutputType(String(payload?.outputType ?? current.outputType));
+  const xdgRuntimeDir = String(payload?.xdgRuntimeDir ?? current.xdgRuntimeDir).trim();
+  const pulseServer = String(payload?.pulseServer ?? current.pulseServer).trim();
+  const pipewireRemote = String(payload?.pipewireRemote ?? current.pipewireRemote).trim();
+  const alsaDevice = String(payload?.alsaDevice ?? current.alsaDevice).trim();
+  const fifoPath = payload?.fifoPath ?? current.fifoPath;
+  const fifoFormat = payload?.fifoFormat ?? current.fifoFormat;
+  if (outputType === "fifo") {
+    validateFifoPreferences(fifoPath, fifoFormat);
+  }
 
   await Promise.all([
     songloft.storage.set(STORAGE_AUDIO_OUTPUT_TYPE, outputType),
     songloft.storage.set(STORAGE_AUDIO_XDG_RUNTIME_DIR, xdgRuntimeDir),
     songloft.storage.set(STORAGE_AUDIO_PULSE_SERVER, pulseServer),
     songloft.storage.set(STORAGE_AUDIO_PIPEWIRE_REMOTE, pipewireRemote),
-    songloft.storage.set(STORAGE_AUDIO_ALSA_DEVICE, alsaDevice)
+    songloft.storage.set(STORAGE_AUDIO_ALSA_DEVICE, alsaDevice),
+    songloft.storage.set(STORAGE_AUDIO_FIFO_PATH, fifoPath),
+    songloft.storage.set(STORAGE_AUDIO_FIFO_FORMAT, fifoFormat)
   ]);
 
   return readAudioPreferences(songloft);
@@ -3512,6 +3533,11 @@ async function detectSupportedAudioOutputTypes(songloft: SongloftCommandApi): Pr
     }
   });
 
+  // FIFO must be explicitly advertised by a successful version check.
+  if (versionResult?.exitCode === 0 && hasFifoOutput(rawVersion)) {
+    supportedTypes.push("fifo");
+  }
+
   return {
     program: resolvedMpd.program,
     supportedTypes,
@@ -3520,9 +3546,54 @@ async function detectSupportedAudioOutputTypes(songloft: SongloftCommandApi): Pr
 }
 
 async function detectAudioOutput(songloft: SongloftCommandApi): Promise<MpdAudioOutputDetection> {
-  const [supportInfo, storedPreferences, xdgRuntimeDir, pulseServer, pipewireRemote, pactlInfo, aplayList, userId, runtimeShellProbe, runtimeAudioServiceProbe] = await Promise.all([
+  const [supportInfo, storedPreferences] = await Promise.all([
     detectSupportedAudioOutputTypes(songloft),
-    readAudioPreferences(songloft),
+    readAudioPreferences(songloft)
+  ]);
+  // An explicit FIFO never participates in device detection or automatic fallback.
+  if (storedPreferences.outputType === "fifo") {
+    validateFifoPreferences(storedPreferences.fifoPath, storedPreferences.fifoFormat);
+    if (!supportInfo.supportedTypes.includes("fifo")) {
+      throw new Error("当前 MPD 的 mpd --version 未报告 fifo 输出支持；请安装支持 FIFO 的 MPD，或手动选择其他输出。");
+    }
+    const selected: MpdAudioOutputCandidate = {
+      type: "fifo",
+      name: "Songloft FIFO Output",
+      lines: [
+        'audio_output {',
+        '  type "fifo"',
+        '  name "Songloft FIFO Output"',
+        `  path "${escapeMpdConfigString(storedPreferences.fifoPath)}"`,
+        `  format "${storedPreferences.fifoFormat}"`,
+        '  mixer_type "software"',
+        '}'
+      ],
+      reason: "手动指定 FIFO PCM 输出"
+    };
+    const hints = [
+      "请在宿主侧提供 MPD 可写且与 Snapserver 共享的 FIFO 目录；插件不会创建或删除该目录及管道。",
+      `Snapserver 的 sampleformat 必须与 ${storedPreferences.fifoFormat} 一致。`
+    ];
+    return {
+      selected,
+      candidates: [selected],
+      supportedTypes: supportInfo.supportedTypes,
+      notes: ["已按手动配置选择 FIFO，无需声卡或桌面音频会话", ...hints],
+      env: {},
+      preferences: storedPreferences,
+      guidance: {
+        summary: "通过 FIFO 向 Snapcast 输出 PCM 音频",
+        hints,
+        recommendedOutputType: "fifo",
+        recommendedOutputLabel: getAudioOutputTypeLabel("fifo"),
+        recommendedAlsaDevice: "",
+        recommendedAlsaLabel: "",
+        alsaDeviceOptions: []
+      }
+    };
+  }
+
+  const [xdgRuntimeDir, pulseServer, pipewireRemote, pactlInfo, aplayList, userId, runtimeShellProbe, runtimeAudioServiceProbe] = await Promise.all([
     readEnvVar(songloft, "XDG_RUNTIME_DIR"),
     readEnvVar(songloft, "PULSE_SERVER"),
     readEnvVar(songloft, "PIPEWIRE_REMOTE"),
@@ -4200,6 +4271,8 @@ export async function getMpdRuntimeStatus(songloft: SongloftCommandApi): Promise
   if (
     runtimeFiles?.configPath &&
     resolvedMpd.executableAvailable &&
+    audioPreferences.outputType !== "fifo" &&
+    audioSnapshot?.selectedType !== "fifo" &&
     (audioPreferences.outputType === "alsa" || playerState.playbackStatus === "paused")
   ) {
     const probeConfigPath = runtimeFiles ? await writeForegroundProbeConfig(songloft, runtimeFiles).catch(() => "") : "";
@@ -4268,13 +4341,23 @@ export async function getMpdLog(songloft: SongloftCommandApi) {
 
 export async function getMpdStartupDiagnostics(songloft: SongloftCommandApi) {
   const runtimeFiles = await readRuntimeFilesSnapshot(songloft);
-  const [runtime, player, log, binary, running] = await Promise.all([
-    getMpdRuntimeStatus(songloft),
+  const [runtimeResult, player, log, binary, running, audioSnapshot] = await Promise.all([
+    getMpdRuntimeStatus(songloft).then(
+      (runtime) => ({ runtime, error: null }),
+      (error) => ({ runtime: null, error: String(error) })
+    ),
     getPlayerState(songloft),
     getMpdLog(songloft),
     getBinaryStatus(songloft),
-    songloft.command.isRunning(MPD_PROCESS_NAME).catch(() => false)
+    songloft.command.isRunning(MPD_PROCESS_NAME).catch(() => false),
+    readAudioOutputSnapshot(songloft)
   ]);
+  const { runtime, error: runtimeError } = runtimeResult;
+  // Saved preferences may differ from the still-running configuration. Do not
+  // launch another writer for either FIFO, or when output settings are unknown.
+  const skipForegroundProbes = runtime === null ||
+    runtime?.audioPreferences.outputType === "fifo" ||
+    audioSnapshot?.selectedType === "fifo";
 
   const [resolvedMpd, resolvedMpc] = await Promise.all([
     resolveBinary(songloft, "mpd"),
@@ -4290,7 +4373,7 @@ export async function getMpdStartupDiagnostics(songloft: SongloftCommandApi) {
   const configContent = runtimeFiles?.configPath
     ? await readTextFileViaShell(songloft, runtimeFiles.configPath)
     : "";
-  const mpdLaunchProbe = (resolvedMpd.executableAvailable && runtimeFiles?.configPath)
+  const mpdLaunchProbe = (!skipForegroundProbes && resolvedMpd.executableAvailable && runtimeFiles?.configPath)
     ? await probeResolvedForegroundLaunch(
       songloft,
       resolvedMpd,
@@ -4298,7 +4381,7 @@ export async function getMpdStartupDiagnostics(songloft: SongloftCommandApi) {
       runtimeFiles?.configPath ? undefined : undefined
     )
     : null;
-  const mpdStderrProbe = (resolvedMpd.executableAvailable && runtimeFiles?.configPath)
+  const mpdStderrProbe = (!skipForegroundProbes && resolvedMpd.executableAvailable && runtimeFiles?.configPath)
     ? await probeResolvedForegroundLaunch(
       songloft,
       resolvedMpd,
@@ -4306,6 +4389,14 @@ export async function getMpdStartupDiagnostics(songloft: SongloftCommandApi) {
     )
     : null;
   const startupNotes: string[] = [];
+  if (runtimeError !== null) {
+    startupNotes.push(
+      "运行时状态读取失败：" + runtimeError,
+      "无法确认音频输出配置，已跳过 MPD 前台启动探针；其他诊断结果仍可查看。"
+    );
+  } else if (skipForegroundProbes) {
+    startupNotes.push("已保存或当前托管配置使用 FIFO，已跳过 MPD 前台启动探针，避免向同一管道启动额外写入进程。");
+  }
   const startupCombinedOutput = `${mpdLaunchProbe?.combined || ""}\n${mpdStderrProbe?.combined || ""}`.toLowerCase();
   if (startupCombinedOutput.includes("u_init() failed") || startupCombinedOutput.includes("u_file_access_error")) {
     startupNotes.push("MPD 在前台探针阶段即因 ICU 初始化失败退出；这通常不是配置或音频输出问题，而是当前发布的 MPD bundle 运行时依赖 ICU 数据但宿主无法访问。建议重新发布关闭 ICU 的 bundle");
@@ -4316,6 +4407,7 @@ export async function getMpdStartupDiagnostics(songloft: SongloftCommandApi) {
     running,
     runtimeFiles,
     runtime,
+    runtimeError,
     player,
     log,
     binary,
@@ -5753,6 +5845,11 @@ async function forceKillMpdProcess(
  */
 async function releaseAudioDevices(songloft: SongloftCommandApi): Promise<void> {
   try {
+    const preferences = await readAudioPreferences(songloft);
+    const snapshot = await readAudioOutputSnapshot(songloft);
+    if (preferences.outputType === "fifo" || snapshot?.selectedType === "fifo") {
+      return;
+    }
     // 释放ALSA设备
     try {
       await songloft.command.exec("fuser", ["-k", "/dev/snd/*"], { timeout: 3000 });

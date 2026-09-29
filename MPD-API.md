@@ -16,7 +16,7 @@ MPD 播控音箱插件（entryPath: `mpd-player`）通过 `songloft.comm` 暴露
 
 ## 调用方式
 
-所有 API 使用 `songloft.comm.call(entryPath, action, payload, timeout)` 调用：
+以下插件间通信 API 使用 `songloft.comm.call(entryPath, action, payload, timeout)` 调用：
 
 ```typescript
 var result = await songloft.comm.call("mpd-player", "action-name", { ... }, 5000);
@@ -279,6 +279,28 @@ setInterval(async function() {
 - `queue-remove` 支持 `position`（单条）和 `positions`（批量），至少传一个
 - `queue-jump` 和 `queue-move` 的 position 均为 1-based
 - `set-mode` 只修改传入的字段，不传的字段保持当前值不变
+
+## HTTP 音频配置（独立于插件间通信）
+
+FIFO 是 MPD 模式内的音频输出类型，播放器 `outputMode` 仍为 `"mpd"`。下列接口是设置页使用的 HTTP 接口，**不是 `songloft.comm` action**，沿用宿主的认证要求。
+
+- 读取：`GET /api/v1/jsplugin/mpd-player/api/mpd/status`，返回 `data.audioPreferences`。
+- 保存：`POST /api/v1/jsplugin/mpd-player/api/mpd/audio/preferences`，`Content-Type: application/json`。
+
+```json
+{
+  "outputType": "fifo",
+  "fifoPath": "/run/snapcast/songloft.fifo",
+  "fifoFormat": "44100:16:2",
+  "restart": true
+}
+```
+
+`outputType` 可选 `auto`、`pulse`、`alsa`、`pipewire`、`null`、`fifo`；已有 `xdgRuntimeDir`、`pulseServer`、`pipewireRemote`、`alsaDevice` 字段继续保留。首次未配置 FIFO 字段时默认路径为 `/run/snapcast/songloft.fifo`，格式为 `44100:16:2`；保存时省略字段会保留当前值。显式传入空字符串会保留在界面中，选择 FIFO 后由服务器拒绝，不静默填默认值。
+
+FIFO 路径必须是绝对 POSIX 文件路径，最多 4095 字符，不能包含控制字符、双引号、反斜杠或空/点路径段。PCM 格式为 `rate:bits:channels`，采样率 8000–384000、位深 16/24/32、声道 1/2；不要加前后空白。`restart: true` 会重启插件管理的 MPD；成功响应的 `data` 包含 `preferences`、`restart`、`runtime`、`player`。参数错误或 MPD 未报告 FIFO 支持会返回错误，不自动切到 ALSA/Pulse。
+
+恢复默认设置时发送 `outputType: "auto"`，将桌面音频/ALSA 字段清空，并显式将 FIFO 两项恢复为上述默认值。部署须在 MPD 与 Snapserver 启动前预建 FIFO，保留既有管道 inode；插件本身不管理该管道的创建/删除。共享目录、UID/GID 权限、MPD 创建管道时的清理行为、PCM/FLAC 配置及未实测范围见 [README 的 FIFO / Snapcast 说明](README.md#fifo--snapcastlinux-docker)。
 
 ## 附录：Songloft 插件间通信文档
 

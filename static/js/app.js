@@ -1,6 +1,8 @@
 (function () {
   var AUDIO_GUIDE_SUPPRESS_REMINDER_STORAGE_KEY = "songloft-mpd:audio-guide:suppress-reminder";
   var AUDIO_ADVANCED_EXPANDED_STORAGE_KEY = "songloft-mpd:audio-advanced:expanded";
+  var DEFAULT_FIFO_PATH = "/run/snapcast/songloft.fifo";
+  var DEFAULT_FIFO_FORMAT = "44100:16:2";
   var QUEUE_STATE_STORAGE_KEY = "songloft-mpd:queue-state";
   var QUEUE_STATE_CACHE_VERSION = 2;
   if (window.__SONGLOFT_MPD_APP_BOOTED__) {
@@ -1513,7 +1515,9 @@ function getPlayerPollIntervalMs() {
       xdgRuntimeDir: String(source.xdgRuntimeDir || ""),
       pulseServer: String(source.pulseServer || ""),
       pipewireRemote: String(source.pipewireRemote || ""),
-      alsaDevice: String(source.alsaDevice || "")
+      alsaDevice: String(source.alsaDevice || ""),
+      fifoPath: source.fifoPath == null ? DEFAULT_FIFO_PATH : String(source.fifoPath),
+      fifoFormat: source.fifoFormat == null ? DEFAULT_FIFO_FORMAT : String(source.fifoFormat)
     };
   }
 
@@ -1576,7 +1580,9 @@ function getPlayerPollIntervalMs() {
       xdgRuntimeDir: normalized.xdgRuntimeDir,
       pulseServer: normalized.pulseServer,
       pipewireRemote: normalized.pipewireRemote,
-      alsaDevice: normalized.alsaDevice
+      alsaDevice: normalized.alsaDevice,
+      fifoPath: normalized.fifoPath,
+      fifoFormat: normalized.fifoFormat
     });
   }
 
@@ -1586,7 +1592,9 @@ function getPlayerPollIntervalMs() {
       xdgRuntimeDir: getElementValue("audioXdgRuntimeDirInput"),
       pulseServer: getElementValue("audioPulseServerInput"),
       pipewireRemote: getElementValue("audioPipewireRemoteInput"),
-      alsaDevice: getSelectedAudioDeviceValue()
+      alsaDevice: getSelectedAudioDeviceValue(),
+      fifoPath: getElementValue("audioFifoPathInput"),
+      fifoFormat: getElementValue("audioFifoFormatInput")
     });
   }
 
@@ -1636,6 +1644,7 @@ function getPlayerPollIntervalMs() {
     state.audioAdvancedVisible =
       preferences.outputType === "pulse" ||
       preferences.outputType === "pipewire" ||
+      preferences.outputType === "fifo" ||
       hasAudioAdvancedOverrides(preferences);
     state.audioAdvancedPreferenceInitialized = true;
   }
@@ -1661,6 +1670,9 @@ function getPlayerPollIntervalMs() {
     if (outputType === "pulse" || outputType === "pipewire") {
       return "bluetooth";
     }
+    if (outputType === "fifo") {
+      return "fifo";
+    }
     if (outputType === "alsa") {
       return "wired";
     }
@@ -1671,6 +1683,9 @@ function getPlayerPollIntervalMs() {
     var guidance = normalizeAudioGuidance(guidancePayload);
     if (scenario === "bluetooth") {
       return "适合蓝牙音箱或桌面音频。插件会优先使用 PulseAudio / PipeWire，并在下方生成可复制的 Docker 部署模板。";
+    }
+    if (scenario === "fifo") {
+      return "MPD 将 PCM 音频写入共享 FIFO，由 Snapserver 分发给 Snapclient；不需要声卡。两端的路径和 PCM 格式必须一致。";
     }
     if (scenario === "wired") {
       return guidance.recommendedAlsaLabel
@@ -1893,9 +1908,11 @@ function getPlayerPollIntervalMs() {
       ? "蓝牙音箱"
       : scenario === "wired"
         ? "有线 / HDMI"
-        : "默认设置";
+        : scenario === "fifo"
+          ? "FIFO / Snapcast"
+          : "默认设置";
     if (card) {
-      card.classList.remove("is-auto", "is-wired", "is-bluetooth");
+      card.classList.remove("is-auto", "is-wired", "is-bluetooth", "is-fifo");
       if (scenario) {
         card.classList.add("is-" + scenario);
       } else {
@@ -1905,6 +1922,20 @@ function getPlayerPollIntervalMs() {
     updateText("audioScenarioTitle", title);
     updateText("audioScenarioSummary", getAudioScenarioSummary(scenario, guidancePayload));
     updateAudioScenarioButtons(scenario);
+    var isFifo = scenario === "fifo";
+    ["audioPhysicalOutputSection", "audioDesktopSessionSection", "audioBluetoothGuidance"].forEach(function (id) {
+      var element = document.getElementById(id);
+      if (element) {
+        element.hidden = isFifo;
+      }
+    });
+    var fifoSection = document.getElementById("audioFifoSection");
+    if (fifoSection) {
+      fifoSection.hidden = !isFifo;
+    }
+    updateText("audioOutputGuidanceText", isFifo
+      ? "先在共享目录预建稳定的 FIFO，再启动 MPD 与 Snapserver；请勿删除或替换正在使用的管道。"
+      : "蓝牙音箱通常要接通宿主的 PulseAudio 或 PipeWire 会话；有线 / HDMI 一般优先用 ALSA。");
   }
 
   function syncAudioAdvancedVisibility(preferences) {
@@ -2502,6 +2533,8 @@ updatePlayerTrackText(
     setElementValue("audioXdgRuntimeDirInput", preferences.xdgRuntimeDir || "");
     setElementValue("audioPulseServerInput", preferences.pulseServer || "");
     setElementValue("audioPipewireRemoteInput", preferences.pipewireRemote || "");
+    setElementValue("audioFifoPathInput", preferences.fifoPath);
+    setElementValue("audioFifoFormatInput", preferences.fifoFormat);
     renderAudioDeviceOptions(guidancePayload, preferences);
     state.audioPreferences = preferences;
     syncAudioAdvancedPreference();
@@ -4356,6 +4389,8 @@ function shouldRefreshQueueState(forceRefresh) {
         pulseServer: "",
         pipewireRemote: "",
         alsaDevice: "",
+        fifoPath: DEFAULT_FIFO_PATH,
+        fifoFormat: DEFAULT_FIFO_FORMAT,
         restart: true
       } : {
         outputType: formValues.outputType || "auto",
@@ -4363,6 +4398,8 @@ function shouldRefreshQueueState(forceRefresh) {
         pulseServer: formValues.pulseServer,
         pipewireRemote: formValues.pipewireRemote,
         alsaDevice: formValues.alsaDevice,
+        fifoPath: formValues.fifoPath,
+        fifoFormat: formValues.fifoFormat,
         restart: true
       };
       var result = await request("/mpd/audio/preferences", {
@@ -4922,7 +4959,7 @@ var playerSheetPages = document.getElementById("playerSheetPages");
       });
     });
 
-    ["audioOutputTypeSelect", "audioAlsaDeviceSelect", "audioAlsaDeviceInput", "audioXdgRuntimeDirInput", "audioPulseServerInput", "audioPipewireRemoteInput"].forEach(function (id) {
+    ["audioOutputTypeSelect", "audioAlsaDeviceSelect", "audioAlsaDeviceInput", "audioXdgRuntimeDirInput", "audioPulseServerInput", "audioPipewireRemoteInput", "audioFifoPathInput", "audioFifoFormatInput"].forEach(function (id) {
       var element = document.getElementById(id);
       if (!element) {
         return;
@@ -5282,6 +5319,9 @@ window.addEventListener("pagehide", function () {
     bindEvents();
     updateBluetoothTemplateOutputs();
     applyAudioScenarioPreset("bluetooth");
+    // The startup preset is not a user edit; allow the first settings poll to load saved preferences.
+    state.audioPreferencesDirty = false;
+    setAudioPreferenceNotice("", "");
 
     // 初始化UI
     switchView("home", {
