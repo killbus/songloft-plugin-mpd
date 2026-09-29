@@ -300,7 +300,7 @@ FIFO 是 MPD 模式内的音频输出类型，播放器 `outputMode` 仍为 `"mp
 
 FIFO 路径必须是绝对 POSIX 文件路径，最多 4095 字符，不能包含控制字符、双引号、反斜杠或空/点路径段。PCM 格式为 `rate:bits:channels`，采样率 8000–384000、位深 16/24/32、声道 1/2；不要加前后空白。`restart: true` 会重启插件管理的 MPD；成功响应的 `data` 包含 `preferences`、`restart`、`runtime`、`player`。参数错误或 MPD 未报告 FIFO 支持会返回错误，不自动切到 ALSA/Pulse。
 
-恢复默认设置时发送 `outputType: "auto"`，将桌面音频/ALSA 字段清空，并显式将 FIFO 两项恢复为上述默认值。部署须在 MPD 与 Snapserver 启动前预建 FIFO，保留既有管道 inode；插件本身不管理该管道的创建/删除。共享目录、UID/GID 权限、MPD 创建管道时的清理行为、PCM/FLAC 配置及未实测范围见 [README 的 FIFO / Snapcast 说明](README.md#fifo--snapcastlinux-docker)。
+恢复默认设置时发送 `outputType: "auto"`，将桌面音频/ALSA 字段清空，并显式将 FIFO 两项恢复为上述默认值。FIFO 不依赖 Docker；部署须在 MPD 与消费程序启动前预建 FIFO，保留既有管道 inode；插件本身不管理该管道的创建/删除。共享目录、UID/GID 权限、MPD 创建管道时的清理行为、PCM/FLAC 配置及未实测范围见 [README 的 FIFO / Snapcast 说明](README.md#fifo--snapcastlinux)。
 
 ## 附录：Songloft 插件间通信文档
 

@@ -20,7 +20,9 @@ Songloft MPD 播放控制插件 -- 通过 Web 界面控制本地 MPD（Music Pla
 
 ## 环境准备
 
-### 安装 Songloft（Docker）
+插件控制与 Songloft 处于同一运行环境的 MPD。Linux 原生安装和 Docker 部署均可配置 FIFO；Docker 是部署选项。
+
+### 安装 Songloft（Docker 示例：声卡 / 蓝牙输出）
 
 ```bash
 sudo docker run -d \
@@ -52,9 +54,11 @@ sudo docker run -d \
 - `-v /home/admin/.config/pulse/cookie:...` -- admin 是宿主机登录名，按实际用户名修改
 - 容器内需安装 `pulseaudio-utils`：`docker exec songloft apk add --no-cache pulseaudio-utils`
 
-### FIFO / Snapcast（Linux Docker）
+### FIFO / Snapcast（Linux）
 
-音频路径为 **Songloft 管理的 MPD → 共享 FIFO → Snapserver → 局域网 Snapclients**。MPD 仍由插件在 Songloft 容器内管理；插件媒体 URL 使用本机地址，不能直接换成独立 MPD sidecar。FIFO 输出不需要声卡、`/dev/snd` 或 PulseAudio socket。
+以 Snapcast 为例，音频路径为 **Songloft 管理的 MPD → 共享 FIFO → Snapserver → 局域网 Snapclients**。MPD 由插件在 Songloft 所在运行环境中管理；插件媒体 URL 使用本机地址，当前不提供独立远程 MPD 的连接配置。FIFO 输出不需要声卡、`/dev/snd` 或 PulseAudio socket。
+
+FIFO 是本机 PCM 输出接口，Snapserver 是一种消费方；其他能够读取匹配 PCM 格式的程序也可消费。原生部署让 MPD 与消费程序访问同一管道；容器部署通过共享挂载访问同一管道 inode，两端可见的路径字符串可以不同。跨机器需要 Snapcast 等网络传输，同名路径不能共享本机 FIFO。
 
 在设置页展开“音频输出高级设置”，选择 **FIFO / Snapcast**，填写：
 
@@ -65,7 +69,9 @@ sudo docker run -d \
 
 点击“保存并重启 MPD”后生效。路径必须是绝对 POSIX 文件路径；空路径、空格式会报错，不会自动补回默认值。恢复默认设置会切回 `auto`，并将 FIFO 两项恢复为上表数值。若 MPD 的 `mpd --version` 未报告 FIFO 输出支持，插件明确报错，不会自动改走物理声卡。
 
-以下是叠加在**已有 `songloft` 与 `snapserver` 服务**上的 Compose override 片段；按实际服务名修改。镜像、原有数据卷、网络和 Snapserver 配置挂载沿用现有部署，不是独立可运行的 Compose 文件。将两处 `/srv/songloft-snapcast` 替换为同一个宿主目录，不能分别使用容器各自的 `/tmp`。
+#### 可选：Docker 共享目录示例
+
+原生部署可跳过此节。以下是叠加在**已有 `songloft` 与 `snapserver` 服务**上的 Compose override 片段；按实际服务名修改。镜像、原有数据卷、网络和 Snapserver 配置挂载沿用现有部署，不是独立可运行的 Compose 文件。将两处 `/srv/songloft-snapcast` 替换为同一个宿主目录，不能分别使用容器各自的 `/tmp`。
 
 ```yaml
 services:
@@ -79,15 +85,17 @@ services:
 
 此追加式 override 不会移除基础 Compose 中已有的 `devices`、Pulse 挂载或音频环境变量。仅使用 FIFO 时，可在自己的基础配置中移除声卡与桌面音频专用项；不要使用后文的蓝牙修复脚本来配置 FIFO。
 
-部署负责创建共享父目录，并在 **MPD 与 Snapserver 启动之前预建稳定的 FIFO**。按两个容器内 **MPD 与 Snapserver 实际进程的 UID/GID**（包括补充组）设置权限，不要套用固定的 1000、29 或用户名：父目录须允许双方逐级遍历；FIFO 须允许 MPD 写、Snapserver 读。双方可加入同一个数字 GID，采用目录 setgid 和管道 0660。容器入口的 `id` 不一定代表降权后进程的身份；请核对实际进程、容器补充组和宿主文件权限。
+#### 管道准备（原生与容器部署通用）
 
-以下脚本在宿主执行，先将 `MPD_UID` 设为 MPD 的实际数字 UID，将 `FIFO_GID` 设为双方实际具备的共享数字 GID；需要有创建目录与修改属主的权限。它只创建缺失的管道，已有 FIFO 保持原 inode，已有非 FIFO 路径报错：
+部署负责创建共享父目录，并在 **MPD 与 Snapserver 启动之前预建稳定的 FIFO**。按 **MPD 与 Snapserver 实际进程的 UID/GID**（包括补充组）设置权限，不要套用固定的 1000、29 或用户名：父目录须允许双方逐级遍历；FIFO 须允许 MPD 写、Snapserver 读。双方可加入同一个数字 GID，采用目录 setgid 和管道 0660。使用容器时还需核对 UID/GID 映射。容器入口的 `id` 不一定代表降权后进程的身份；请核对实际进程、容器补充组和宿主文件权限。
+
+以下脚本在持有 FIFO 的 Linux 主机执行。原生部署使用 `/run/snapcast`，与插件默认值一致；采用上面的 Docker 挂载示例时，将 `FIFO_DIR` 改为宿主目录 `/srv/songloft-snapcast`。先将 `MPD_UID` 设为该主机文件权限视角下 MPD 的实际数字 UID，将 `FIFO_GID` 设为双方实际具备的共享数字 GID；需要有创建目录与修改属主的权限。它只创建缺失的管道，已有 FIFO 保持原 inode，已有非 FIFO 路径报错：
 
 ```sh
 set -eu
 : "${MPD_UID:?请填写 MPD 进程实际数字 UID}"
 : "${FIFO_GID:?请填写双方共有的实际数字 GID}"
-FIFO_DIR=/srv/songloft-snapcast
+FIFO_DIR=/run/snapcast
 FIFO_PATH="$FIFO_DIR/songloft.fifo"
 install -d -m 2770 -o "$MPD_UID" -g "$FIFO_GID" "$FIFO_DIR"
 if [ -p "$FIFO_PATH" ]; then
@@ -105,6 +113,8 @@ fi
 
 预建管道可避免 MPD 重启删除并替换 Snapserver 正在读取的 inode。不要在管道路径创建普通文件，也不要删除/重建正在使用的 FIFO：已打开的读写端会继续绑定旧 inode，导致双方读写不同管道。确认部署脚本与 Snapserver 镜像也不会替换管道；如果宿主父目录位于易失的 `/run`，主机重启后应在两个服务启动前重新准备目录和 FIFO。
 
+#### Snapserver 消费示例
+
 在现有 Snapserver 配置的 `[stream]` 中添加以下源，并让它加载该配置：
 
 ```ini
@@ -116,7 +126,7 @@ source = pipe:///run/snapcast/songloft.fifo?name=Songloft&sampleformat=44100:16:
 
 本地源码、设置页和错误路径验证已通过 23 项测试，并生成安装包；全量 TypeScript 仍有 239 条既有诊断，本次未新增。详见 [本地验证记录](docs/fifo-local-validation.md)。
 
-本次开发环境无 Linux 音频运行时，**尚未实测 MPD → FIFO → Snapserver → Snapclient 播放**。上面是待部署验证的配置示例，需核对所用 Snapserver 版本的 pipe 源参数及 MPD 的 FIFO 支持。实际验收还包括管道类型与权限、客户端出声/同步、暂停/恢复、重启重连和缓存后拖动；界面模拟检查不能替代这些运行时验收。
+GitHub CI 已在 Ubuntu 24.04 直接运行系统 MPD、Snapserver 和 Snapclient，验证首播、暂停恢复、切歌、MPD 重启及 Snapserver 重连后的 PCM 输出，以及预建 FIFO inode 保持。该测试不依赖 Docker，见 [Linux CI 验收记录](docs/fifo-ci.md)。真实 Songloft 宿主与托管 MPD bundle、目标部署权限、扬声器出声/同步和完整缓存后拖动仍需分别验收；容器部署还需验证共享挂载。
 
 ### 蓝牙音箱自动连接
 
@@ -263,7 +273,7 @@ npm run validate  # 验证构建产物
 
 - Songloft 宿主版本 >= 2.8.2
 - 插件权限：`storage`、`songs.read`、`playlists.read`、`command`、`net`（DLNA 需要）
-- 容器内需安装 `pulseaudio-utils`（蓝牙切换需要 `pactl` 命令）
+- 使用 PulseAudio 蓝牙切换时，MPD 所在运行环境需安装 `pulseaudio-utils`（提供 `pactl`）；仅使用 FIFO 时不需要该工具
 
 ## 致谢
 
