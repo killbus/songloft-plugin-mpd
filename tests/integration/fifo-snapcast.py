@@ -85,7 +85,7 @@ try:
     server = start('snapserver', *server_args)
     ready(1704)
     client = start('snapclient', 'snapclient', '-h', '127.0.0.1', '--player',
-                   'file:filename=' + str(OUT / 'received.pcm'), '--sampleformat', '44100:16:2')
+                   'file:filename=' + str(OUT / 'received.pcm'), '--sampleformat', '44100:16:*')
     mpd_args = ('mpd', '--no-daemon', str(OUT / 'mpd.conf'))
     mpd = start('mpd', *mpd_args)
     ready(6600)
