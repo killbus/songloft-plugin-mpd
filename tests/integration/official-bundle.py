@@ -56,7 +56,11 @@ def main():
             wrapper = wrappers / name
             wrapper.write_text('#!/bin/sh\nexec ' + shlex.join(command) + ' "$@"\n')
             wrapper.chmod(0o755)
-        evidence['versions'] = {name: run(str(wrappers / name), '--version') for name in ('mpd', 'mpc')}
+        # MPC's help command reports its client version without contacting MPD.
+        evidence['versions'] = {
+            'mpd': run(str(wrappers / 'mpd'), '--version'),
+            'mpc': run(str(wrappers / 'mpc'), 'help'),
+        }
         os.environ['PATH'] = str(wrappers) + os.pathsep + os.environ['PATH']
         subprocess.run([sys.executable, str(ROOT / 'tests/integration/fifo-snapcast.py')], check=True)
         result_path = OUT / 'result.json'
