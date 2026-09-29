@@ -235,11 +235,14 @@
               </div>
               <div class="audio-guidance-card">
                 <p class="eyebrow">使用说明</p>
-                <p class="muted-text">蓝牙音箱通常要接通宿主的 PulseAudio 或 PipeWire 会话；有线 / HDMI 一般优先用 ALSA。</p>
+                <p id="audioOutputGuidanceText" class="muted-text">蓝牙音箱通常要接通宿主的 PulseAudio 或 PipeWire 会话；有线 / HDMI 一般优先用 ALSA。</p>
+                <div id="audioBluetoothGuidance">
                 <p id="audioFallbackWarning" class="binary-action-notice error" hidden></p>
                 <p id="audioBluetoothCheckSummary" class="muted-text" hidden></p>
                 <div id="audioBluetoothChecklist" class="stack-list compact" hidden></div>
+                </div>
               </div>
+              <div id="audioPhysicalOutputSection">
               <label class="binary-field">
                 <span>ALSA 设备</span>
                 <select id="audioAlsaDeviceSelect" class="search-input">
@@ -255,9 +258,10 @@
                 </label>
                 <p class="muted-text">只有在下拉列表没有目标设备时，才建议手动输入 `plughw:1,0` 这类设备名。</p>
               </div>
+              </div>
               <details id="audioAdvancedCard" class="audio-fold-card">
                 <summary class="audio-fold-summary">
-                  <span>蓝牙 / 桌面音频高级设置</span>
+                  <span>音频输出高级设置（含 FIFO / Snapcast）</span>
                   <span class="badge">可折叠</span>
                 </summary>
                 <div id="audioAdvancedSection" class="audio-manual-section audio-advanced-section">
@@ -268,9 +272,22 @@
                       <option value="pulse">PulseAudio（蓝牙 / 桌面音频）</option>
                       <option value="alsa">ALSA（有线 / HDMI）</option>
                       <option value="pipewire">PipeWire（桌面 / 蓝牙）</option>
+                      <option value="fifo">FIFO / Snapcast（共享管道）</option>
                       <option value="null">Null（仅诊断）</option>
                     </select>
                   </label>
+                  <div id="audioFifoSection" hidden>
+                    <label class="binary-field">
+                      <span>FIFO 路径</span>
+                      <input id="audioFifoPathInput" class="search-input" type="text" value="/run/snapcast/songloft.fifo" placeholder="/run/snapcast/songloft.fifo" spellcheck="false">
+                    </label>
+                    <label class="binary-field">
+                      <span>PCM 格式（采样率:位深:声道数）</span>
+                      <input id="audioFifoFormatInput" class="search-input" type="text" value="44100:16:2" placeholder="44100:16:2" spellcheck="false">
+                    </label>
+                    <p class="muted-text">默认 44100 Hz、16 位、双声道。Snapserver 的 sampleformat 必须与此一致；传输编码可设为 flac。</p>
+                  </div>
+                  <div id="audioDesktopSessionSection">
                   <label class="binary-field">
                     <span>XDG_RUNTIME_DIR</span>
                     <input id="audioXdgRuntimeDirInput" class="search-input" type="text" placeholder="例如 /run/user/1000">
@@ -284,6 +301,7 @@
                     <input id="audioPipewireRemoteInput" class="search-input" type="text" placeholder="例如 pipewire-0">
                   </label>
                   <p class="muted-text">如果你接的是蓝牙音箱，通常需要宿主机提供 PulseAudio 或 PipeWire 会话；Docker 容器里仅透传 `/dev/snd` 往往只能驱动有线输出。</p>
+                  </div>
                 </div>
               </details>
             </div>

@@ -35,6 +35,7 @@ import {
   playBatch,
   playBatchWithStatus,
   playSongById,
+  readAudioPreferences,
   removeQueueItem,
   restartManagedMpd,
   runPlayerAction,
@@ -487,12 +488,14 @@ async function onHTTPRequest(req: HTTPRequest): Promise<HTTPResponse> {
       return jsonResponse(await getMpdRuntimeStatus(songloft));
     } catch (error) {
       songloft.log.error(`[/api/mpd/status] 错误: ${String(error)}`);
+      const audioPreferences = await readAudioPreferences(songloft);
       return jsonResponse({
         serviceStatus: "error",
         playbackStatus: "stopped",
         notes: [`获取 MPD 状态时出错: ${String(error)}`],
         playerState: null,
-        audio: { outputType: "unknown", outputName: "未知", preferences: {} },
+        audioPreferences,
+        audio: { outputType: "unknown", outputName: "未知", preferences: audioPreferences },
         configExists: false,
         binaryStatus: { mpd: { source: "unknown" }, mpc: { source: "unknown" } },
         log: "",
@@ -540,7 +543,7 @@ async function onHTTPRequest(req: HTTPRequest): Promise<HTTPResponse> {
       });
     } catch (error) {
       const errorObj = error instanceof Error ? error : new Error(String(error));
-      const diagnostics = await safeExecute(
+      const diagnostics = await safeExecute<Awaited<ReturnType<typeof getMpdStartupDiagnostics>> | { failed: boolean; message: string }>(
         () => getMpdStartupDiagnostics(songloft),
         { failed: true, message: "诊断信息获取失败" },
         "获取诊断信息",
@@ -564,11 +567,13 @@ async function onHTTPRequest(req: HTTPRequest): Promise<HTTPResponse> {
 
   if (method === "POST" && path === "/api/mpd/audio/preferences") {
     const payload = parseJson<{
-      outputType?: "auto" | "pulse" | "alsa" | "pipewire" | "null";
+      outputType?: "auto" | "pulse" | "alsa" | "pipewire" | "null" | "fifo";
       xdgRuntimeDir?: string;
       pulseServer?: string;
       pipewireRemote?: string;
       alsaDevice?: string;
+      fifoPath?: string;
+      fifoFormat?: string;
       restart?: boolean;
     }>(req.body) || {};
 
