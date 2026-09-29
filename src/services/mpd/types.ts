@@ -59,7 +59,7 @@ export type PlaylistRecord = {
 
 // ===== 音频相关类型 =====
 
-export type MpdAudioOutputType = "auto" | "pulse" | "alsa" | "pipewire" | "null";
+export type MpdAudioOutputType = "auto" | "pulse" | "alsa" | "pipewire" | "null" | "fifo";
 
 export type MpdAudioOutputCandidate = {
   type: MpdAudioOutputType;
@@ -76,6 +76,8 @@ export type AudioPreferencePayload = {
   pulseServer?: string;
   pipewireRemote?: string;
   alsaDevice?: string;
+  fifoPath?: string;
+  fifoFormat?: string;
 };
 
 export type AudioGuidancePayload = {
