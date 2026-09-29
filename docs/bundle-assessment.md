@@ -36,3 +36,22 @@ UI installer or real Emby service. Image latest is resolved and recorded per run
 a successful result applies to the recorded digest. Other architectures require
 separate acceptance. Bundle provenance remains a separate open question even if
 playback passes. Do not claim a passing result before examining CI evidence.
+
+## Verified result
+
+CI https://github.com/killbus/songloft-plugin-mpd/actions/runs/36526732420
+passed on commit 9f79994. The initial run failed in the test's MPC version probe;
+MPC uses `help` to report its client version, not `--version`.
+
+The pinned v1.0.1 x86_64-musl asset contains MPD 0.23.15, reports FIFO output
+and FFmpeg AAC decoding, and passed first play, pause/resume, next track, MPD
+restart, and Snapserver reconnect with fresh PCM measured at Snapclient. The
+precreated FIFO inode was preserved.
+
+Official image repository digest:
+`songloft/songloft@sha256:d39a89a38db855bed63a83469dc816d767386c3f5c0db953d8990bb1d08f14fa`.
+
+This proves the existing candidate works for the tested runtime/audio scope; a
+new binary build pipeline is not required for that scope. UI bundle installation,
+production Emby playback, other platforms, and source-to-asset provenance remain
+outside this passing result. Default plugin download URLs remain unchanged.
